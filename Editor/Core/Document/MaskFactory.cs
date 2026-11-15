@@ -1,58 +1,78 @@
 using System.IO;
-using Archura.UVMaskPainter.Editor.Targeting;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 
 namespace Archura.UVMaskPainter.Editor.Document
 {
-    /// <summary>Creates masks with no dialogs: main-texture resolution, saved next to the material, auto-assigned.</summary>
+    /// <summary>Creates mask files with no dialogs: linear PNG, saved next to the object's material, tagged as a mask.</summary>
     public static class MaskFactory
     {
         public const int DefaultResolution = 1024;
         public static readonly Color DefaultFill = new Color(0f, 0f, 0f, 0f);
 
-        public static int SuggestResolution(Material material)
+        public static string DefaultName(Renderer owner) => owner != null ? $"{owner.name} Mask" : "Mask";
+
+        /// <summary>Largest main texture of the renderer's materials (power of two, 256–4096), else 1024.</summary>
+        public static int SuggestResolution(Renderer owner)
         {
-            Texture main = material != null ? material.mainTexture : null;
-            int size = main != null ? Mathf.Max(main.width, main.height) : DefaultResolution;
-            return Mathf.Clamp(Mathf.ClosestPowerOfTwo(size), 256, 4096);
+            int size = 0;
+            if (owner != null)
+                foreach (Material material in owner.sharedMaterials)
+                {
+                    Texture main = material != null ? material.mainTexture : null;
+                    if (main != null) size = Mathf.Max(size, main.width, main.height);
+                }
+            return size == 0 ? DefaultResolution : Mathf.Clamp(Mathf.ClosestPowerOfTwo(size), 256, 4096);
         }
 
-        public static string SuggestPath(PaintTarget target)
+        /// <summary>Next to the first editable material, else next to the scene, else Assets/.</summary>
+        public static string SuggestFolder(Renderer owner)
         {
-            Material material = target.Material;
-            string materialPath = AssetDatabase.GetAssetPath(material);
-            string folder = string.IsNullOrEmpty(materialPath) || !materialPath.StartsWith("Assets")
-                ? "Assets"
-                : Path.GetDirectoryName(materialPath).Replace('\\', '/');
+            if (owner != null)
+                foreach (Material material in owner.sharedMaterials)
+                {
+                    string path = material != null ? AssetDatabase.GetAssetPath(material) : null;
+                    if (!string.IsNullOrEmpty(path) && path.StartsWith("Assets/") && path.EndsWith(".mat"))
+                        return Path.GetDirectoryName(path).Replace('\\', '/');
+                }
 
-            string baseName = material != null ? material.name : target.Renderer.name;
-            string fileName = $"{baseName}_{target.PropertyName.TrimStart('_')}.png";
-            return AssetDatabase.GenerateUniqueAssetPath($"{folder}/{fileName}");
+            PrefabStage stage = PrefabStageUtility.GetCurrentPrefabStage();
+            string context = stage != null ? stage.assetPath : owner != null ? owner.gameObject.scene.path : null;
+            return !string.IsNullOrEmpty(context) && context.StartsWith("Assets/")
+                ? Path.GetDirectoryName(context).Replace('\\', '/')
+                : "Assets";
         }
 
-        public static bool CanAssign(PaintTarget target, out string reason)
+        public static Texture2D Create(Renderer owner, string name, int channelCount, int resolution = 0)
         {
-            reason = null;
-            Material material = target?.Material;
-            if (material == null)
+            if (resolution <= 0) resolution = SuggestResolution(owner);
+            string path = AssetDatabase.GenerateUniqueAssetPath($"{SuggestFolder(owner)}/{SanitizeFileName(name, owner)}.png");
+            CreateMaskFile(path, resolution, resolution, DefaultFill);
+            new MaskInfo(channelCount, MaskLibrary.OwnerKey(owner)).Write(path);
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);   // reimport can replace the object
+        }
+
+        /// <summary>
+        /// Turns an existing texture into a mask of <paramref name="owner"/>. Formats that can't be
+        /// written back (JPG, TGA…) are converted to a PNG copy, which is returned instead.
+        /// </summary>
+        public static Texture2D Adopt(Texture2D texture, Renderer owner, int channelCount)
+        {
+            string path = AssetDatabase.GetAssetPath(texture);
+            if (!TextureIO.CanWrite(path) || !TextureIO.CanReadLossless(path))
             {
-                reason = "The material slot is empty.";
-                return false;
+                Texture2D pixels = TextureIO.Load(path);
+                path = AssetDatabase.GenerateUniqueAssetPath(Path.ChangeExtension(path, ".png"));
+                TextureIO.Write(path, pixels);
+                Object.DestroyImmediate(pixels);
+                AssetDatabase.ImportAsset(path);
             }
-
-            string path = AssetDatabase.GetAssetPath(material);
-            if (string.IsNullOrEmpty(path)) return true; // scene-owned material instance
-
-            if (path.StartsWith("Packages/") || !path.EndsWith(".mat"))
-            {
-                reason = $"'{material.name}' is read-only (it comes from {Path.GetFileName(path)}). " +
-                         "Extract or duplicate the material to paint on it.";
-                return false;
-            }
-            return true;
+            new MaskInfo(channelCount, MaskLibrary.OwnerKey(owner)).Write(path);
+            return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
         }
 
+        /// <summary>Writes a solid-color linear PNG with mask import settings (4 channels, no metadata).</summary>
         public static Texture2D CreateMaskFile(string assetPath, int width, int height, Color fill)
         {
             var pixels = new Texture2D(width, height, TextureFormat.RGBA32, false, linear: true) { hideFlags = HideFlags.HideAndDontSave };
@@ -67,24 +87,11 @@ namespace Archura.UVMaskPainter.Editor.Document
             return AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
         }
 
-        public static bool TryCreateFor(PaintTarget target, out Texture2D texture, out string error)
+        public static string SanitizeFileName(string name, Renderer owner = null)
         {
-            texture = null;
-            if (!CanAssign(target, out error)) return false;
-
-            int size = SuggestResolution(target.Material);
-            texture = CreateMaskFile(SuggestPath(target), size, size, DefaultFill);
-            Assign(target, texture);
-            TargetResolver.Remember(target);
-            return true;
-        }
-
-        public static void Assign(PaintTarget target, Texture2D texture)
-        {
-            Material material = target.Material;
-            Undo.RecordObject(material, "Assign Mask");
-            material.SetTexture(target.PropertyName, texture);
-            EditorUtility.SetDirty(material);
+            if (string.IsNullOrWhiteSpace(name)) name = DefaultName(owner);
+            foreach (char c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+            return name.Trim();
         }
     }
 }

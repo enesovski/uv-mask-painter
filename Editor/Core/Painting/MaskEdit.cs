@@ -12,6 +12,8 @@ namespace Archura.UVMaskPainter.Editor.Painting
     /// One undoable edit. Draws into a coverage buffer and composites it onto the pre-edit snapshot,
     /// so strength caps opacity within a stroke. All passes are scissored to the affected pixels.
     /// </summary>
+    internal enum CompositeOp { Blend, Smooth, Invert }
+
     internal sealed class MaskEdit : IDisposable
     {
         // Seam dilation (3 texels) + filtering margin.
@@ -66,7 +68,7 @@ namespace Archura.UVMaskPainter.Editor.Painting
 
         public void FillCoverage() => Clear(Coverage, Color.white);
 
-        public void Composite(BrushMode mode, float value, float strength, MaskChannels channels, RectInt region)
+        public void Composite(CompositeOp op, float value, float strength, MaskChannels channels, RectInt region)
         {
             if (region.width <= 0 || region.height <= 0) return;
 
@@ -89,7 +91,9 @@ namespace Archura.UVMaskPainter.Editor.Painting
             passProperties.Clear();
             passProperties.SetTexture(PaintResources.MainTex, snapshot);
             passProperties.SetTexture(PaintResources.CoverageTex, coverage);
-            int pass = mode == BrushMode.Smooth ? PaintResources.CompositeSmoothPass : PaintResources.CompositePass;
+            int pass = op == CompositeOp.Smooth ? PaintResources.CompositeSmoothPass
+                     : op == CompositeOp.Invert ? PaintResources.CompositeInvertPass
+                     : PaintResources.CompositePass;
             Draw(document.Texture, PaintResources.Quad, Matrix4x4.identity, 0, pass, passProperties, region);
 
             dirty = hasDirty ? Union(dirty, region) : region;
@@ -126,7 +130,11 @@ namespace Archura.UVMaskPainter.Editor.Painting
             commands.Clear();
             commands.SetRenderTarget(target);
             commands.EnableScissorRect(new Rect(region.x, region.y, region.width, region.height));
-            commands.DrawMesh(mesh, matrix, PaintResources.Material, submesh, pass, properties);
+            // Negative submesh: the whole mesh (mask not tied to one material slot).
+            if (submesh >= 0) commands.DrawMesh(mesh, matrix, PaintResources.Material, submesh, pass, properties);
+            else
+                for (int s = 0; s < mesh.subMeshCount; s++)
+                    commands.DrawMesh(mesh, matrix, PaintResources.Material, s, pass, properties);
             commands.DisableScissorRect();
             Graphics.ExecuteCommandBuffer(commands);
         }

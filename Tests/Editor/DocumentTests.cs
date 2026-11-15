@@ -1,8 +1,5 @@
 using Archura.UVMaskPainter.Editor.Document;
-using Archura.UVMaskPainter.Editor.Legacy;
 using Archura.UVMaskPainter.Editor.Painting;
-using Archura.UVMaskPainter.Editor.Targeting;
-using Archura.UVMaskPainter.Legacy;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -132,59 +129,6 @@ namespace Archura.UVMaskPainter.Editor.Tests
             Assert.AreEqual(path, document.AssetPath);
             Assert.AreSame(document, MaskDocument.Open(document.SourceTexture));
             document.Dispose();
-        }
-
-        [Test]
-        public void TryCreateFor_CreatesAndAssignsAMaskNextToTheMaterial()
-        {
-            var material = new Material(Shader.Find("Hidden/Archura/UVMaskPainter/Tests/MaskTarget"));
-            AssetDatabase.CreateAsset(material, $"{TestUtility.TempFolder}/Rock.mat");
-            MeshRenderer renderer = TestUtility.CreateQuad();
-            renderer.sharedMaterial = material;
-            var target = new PaintTarget(renderer, 0, "_Wear");
-
-            Assert.IsTrue(MaskFactory.TryCreateFor(target, out Texture2D texture, out string error), error);
-
-            Assert.AreEqual($"{TestUtility.TempFolder}/Rock_Wear.png", AssetDatabase.GetAssetPath(texture));
-            Assert.AreSame(texture, material.GetTexture("_Wear"));
-            Assert.AreEqual(MaskFactory.DefaultResolution, texture.width);
-
-            TargetResolver.Forget(material);
-            Object.DestroyImmediate(renderer.gameObject);
-        }
-
-        [Test]
-        public void CanAssign_RejectsReadOnlyMaterials()
-        {
-            MeshRenderer renderer = TestUtility.CreateQuad();
-            renderer.sharedMaterial = AssetDatabase.GetBuiltinExtraResource<Material>("Default-Material.mat");
-
-            Assert.IsFalse(MaskFactory.CanAssign(new PaintTarget(renderer, 0, "_MainTex"), out string reason));
-            StringAssert.Contains("read-only", reason);
-            Object.DestroyImmediate(renderer.gameObject);
-        }
-
-        [Test]
-        public void LegacyMaskAsset_ConvertsToPng()
-        {
-            var asset = ScriptableObject.CreateInstance<MaskAsset>();
-            AssetDatabase.CreateAsset(asset, $"{TestUtility.TempFolder}/Legacy.asset");
-            var texture = new Texture2D(4, 4, TextureFormat.RGBA32, false, true) { name = "Legacy_MaskTex" };
-            var colors = new Color32[16];
-            for (int i = 0; i < colors.Length; i++) colors[i] = new Color32(200, 0, 0, 255);
-            texture.SetPixels32(colors);
-            texture.Apply();
-            AssetDatabase.AddObjectToAsset(texture, asset);
-            var serialized = new SerializedObject(asset);
-            serialized.FindProperty("maskTexture").objectReferenceValue = texture;
-            serialized.ApplyModifiedPropertiesWithoutUndo();
-            AssetDatabase.SaveAssets();
-
-            string path = LegacyMaskConverter.Convert(asset);
-
-            Texture2D pixels = TextureIO.Load(path);
-            Assert.AreEqual(200f / 255f, pixels.GetPixel(1, 1).r, Tolerance);
-            Object.DestroyImmediate(pixels);
         }
     }
 }

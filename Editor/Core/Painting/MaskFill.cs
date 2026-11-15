@@ -10,8 +10,16 @@ namespace Archura.UVMaskPainter.Editor.Painting
         {
             var edit = new MaskEdit(document, null, 0);
             edit.FillCoverage();
-            edit.Composite(BrushMode.Paint, Mathf.Clamp01(value), 1f, channels, edit.FullRegion);
+            edit.Composite(CompositeOp.Blend, Mathf.Clamp01(value), 1f, channels, edit.FullRegion);
             edit.Commit("Fill Mask");
+        }
+
+        public static void Invert(MaskDocument document, MaskChannels channels)
+        {
+            var edit = new MaskEdit(document, null, 0);
+            edit.FillCoverage();
+            edit.Composite(CompositeOp.Invert, 0f, 1f, channels, edit.FullRegion);
+            edit.Commit("Invert Mask");
         }
 
         public static void FillIsland(MaskDocument document, MeshSurface surface, in SurfaceHit hit, MaskChannels channels, float value)
@@ -23,7 +31,7 @@ namespace Archura.UVMaskPainter.Editor.Painting
                 var edit = new MaskEdit(document, surface, hit.Submesh);
                 PaintResources.SetUVChannel(0); // the island mesh carries the surface UVs in UV0
                 edit.DrawCoverage(islandMesh, surface.LocalToWorld, 0, PaintResources.OccupancyPass, null, edit.FullRegion);
-                edit.Composite(BrushMode.Paint, Mathf.Clamp01(value), 1f, channels, edit.ToPixels(uvBounds, MaskEdit.Gutter));
+                edit.Composite(CompositeOp.Blend, Mathf.Clamp01(value), 1f, channels, edit.ToPixels(uvBounds, MaskEdit.Gutter));
                 edit.Commit("Fill UV Island");
             }
             finally

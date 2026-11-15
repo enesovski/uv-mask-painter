@@ -27,6 +27,9 @@ namespace Archura.UVMaskPainter.Editor.History
         private static int appliedRevision;
         private static long usedBytes;
 
+        /// <summary>Raised after undo/redo changed a document's pixels (so it can be saved).</summary>
+        public static event System.Action<MaskDocument> Restored;
+
         public static int StepCount => steps.Count;
         public static long UsedBytes => usedBytes;
 
@@ -115,6 +118,7 @@ namespace Archura.UVMaskPainter.Editor.History
             Destroy(step.Pixels);
             step.Pixels = current;
             step.Document.MarkDirty();
+            Restored?.Invoke(step.Document);
         }
 
         private static RenderTexture CreateRegionTexture(MaskDocument document, RectInt region)

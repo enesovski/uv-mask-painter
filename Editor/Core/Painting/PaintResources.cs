@@ -13,6 +13,7 @@ namespace Archura.UVMaskPainter.Editor.Painting
         public const int DilatePass = 2;
         public const int CompositePass = 3;
         public const int CompositeSmoothPass = 4;
+        public const int CompositeInvertPass = 5;
 
         public static readonly int CoverageTex = Shader.PropertyToID("_CoverageTex");
         public static readonly int OccupancyTex = Shader.PropertyToID("_OccupancyTex");

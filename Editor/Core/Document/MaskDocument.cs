@@ -22,6 +22,7 @@ namespace Archura.UVMaskPainter.Editor.Document
         private bool saveQueued;
         private Action<string> queuedCallback;
         private Task backgroundWrite;
+        private DateTime fileWriteTime;
 
         public RenderTexture Texture { get; }
         public int Width => Texture.width;
@@ -39,8 +40,9 @@ namespace Archura.UVMaskPainter.Editor.Document
 
         static MaskDocument()
         {
-            AssemblyReloadEvents.beforeAssemblyReload += CloseAll;
-            EditorApplication.quitting += CloseAll;
+            // Never lose paint: flush to disk before GPU resources are dropped.
+            AssemblyReloadEvents.beforeAssemblyReload += SaveAndCloseAll;
+            EditorApplication.quitting += SaveAndCloseAll;
         }
 
         private MaskDocument(int width, int height, bool hdr)
@@ -71,7 +73,12 @@ namespace Archura.UVMaskPainter.Editor.Document
 
             string assetGuid = AssetDatabase.AssetPathToGUID(path);
             if (openByGuid.TryGetValue(assetGuid, out MaskDocument existing) && !existing.IsDisposed)
-                return existing;
+            {
+                // Reload if the file was changed outside the painter and we have nothing unsaved.
+                if (existing.IsDirty || existing.isSaving || existing.fileWriteTime == FileWriteTime(path))
+                    return existing;
+                existing.Dispose();
+            }
 
             Texture2D pixels = TextureIO.Load(path);
             MaskDocument document;
@@ -90,6 +97,7 @@ namespace Archura.UVMaskPainter.Editor.Document
             }
 
             document.guid = assetGuid;
+            document.fileWriteTime = FileWriteTime(path);
             openByGuid[assetGuid] = document;
             return document;
         }
@@ -101,10 +109,58 @@ namespace Archura.UVMaskPainter.Editor.Document
             return document;
         }
 
+        /// <summary>The open document for this texture, or null.</summary>
+        public static MaskDocument FindOpen(Texture2D texture)
+        {
+            string path = texture != null ? AssetDatabase.GetAssetPath(texture) : null;
+            if (string.IsNullOrEmpty(path)) return null;
+            return openByGuid.TryGetValue(AssetDatabase.AssetPathToGUID(path), out MaskDocument document) && !document.IsDisposed
+                ? document
+                : null;
+        }
+
         public static void CloseAll()
         {
             foreach (MaskDocument document in new List<MaskDocument>(live))
                 document.Dispose();
+        }
+
+        public static void SaveAndCloseAll()
+        {
+            foreach (MaskDocument document in new List<MaskDocument>(live))
+            {
+                try
+                {
+                    if (document.IsDirty && document.guid != null) document.Save();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[UV Mask Painter] Could not save '{document.DisplayName}': {e.Message}");
+                }
+            }
+            CloseAll();
+        }
+
+        /// <summary>Writes a resampled copy over the file and closes this document (reopen it to continue).</summary>
+        public void ResizeFile(int width, int height)
+        {
+            ThrowIfDisposed();
+            string path = ResolveSavePath();
+            WaitForBackgroundSave();
+
+            var resized = new RenderTexture(width, height, 0, Texture.format, RenderTextureReadWrite.Linear) { hideFlags = HideFlags.HideAndDontSave };
+            resized.Create();
+            Graphics.Blit(Texture, resized);
+            AsyncGPUReadbackRequest request = AsyncGPUReadback.Request(resized);
+            request.WaitForCompletion();
+            byte[] bytes = TextureIO.EncodeRaw(request.GetData<byte>().ToArray(), resized.graphicsFormat, width, height, IsHdr);
+            GpuReadback.Unbind(resized);
+            resized.Release();
+            Object.DestroyImmediate(resized);
+
+            TextureIO.WriteAtomic(TextureIO.ToFullPath(path), bytes, TextureIO.TempDirectory);
+            Dispose();
+            AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
         }
 
         /// <summary>Blocking save. Non-writable formats (TGA, PSD, JPG) are saved as a PNG copy.</summary>
@@ -173,14 +229,13 @@ namespace Archura.UVMaskPainter.Editor.Document
                 EditorApplication.update -= Poll;
                 backgroundWrite = null;
 
-                if (write.IsFaulted)
-                    Debug.LogError($"[UV Mask Painter] Saving '{assetPath}' failed: {write.Exception?.GetBaseException().Message}");
-                else
-                {
-                    FinishSave(assetPath, savedRevision);
-                    completed?.Invoke(assetPath);
-                }
+                bool succeeded = !write.IsFaulted;
+                if (succeeded) FinishSave(assetPath, savedRevision);
+                else Debug.LogError($"[UV Mask Painter] Saving '{assetPath}' failed: {write.Exception?.GetBaseException().Message}");
+
+                // Clear the saving flag first so the callback sees the finished state.
                 EndBackgroundSave();
+                if (succeeded) completed?.Invoke(assetPath);
             }
             EditorApplication.update += Poll;
         }
@@ -210,6 +265,12 @@ namespace Archura.UVMaskPainter.Editor.Document
             Changed?.Invoke(this);
         }
 
+        private static DateTime FileWriteTime(string assetPath)
+        {
+            string full = TextureIO.ToFullPath(assetPath);
+            return File.Exists(full) ? File.GetLastWriteTimeUtc(full) : default;
+        }
+
         private string ResolveSavePath()
         {
             if (guid == null) throw new InvalidOperationException("This mask has no file yet. Use SaveAs.");
@@ -221,6 +282,7 @@ namespace Archura.UVMaskPainter.Editor.Document
         {
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
             if (IsDisposed) return;
+            fileWriteTime = FileWriteTime(assetPath);
 
             if (assetPath != AssetPath)
             {

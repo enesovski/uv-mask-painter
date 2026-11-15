@@ -77,17 +77,26 @@ namespace Archura.UVMaskPainter.Editor.Document
         // Outside Assets so half-written files are never imported. Main thread only.
         public static string TempDirectory => Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Temp", "UVMaskPainter");
 
-        public static void ApplyMaskImportSettings(string assetPath)
+        public static void ApplyMaskImportSettings(string assetPath, int channelCount = 4)
         {
             if (!(AssetImporter.GetAtPath(assetPath) is TextureImporter importer)) return;
-
-            importer.textureType = TextureImporterType.Default;
-            importer.sRGBTexture = false;
-            importer.alphaSource = TextureImporterAlphaSource.FromInput;
-            importer.alphaIsTransparency = false;
-            importer.mipmapEnabled = true;
-            importer.filterMode = FilterMode.Bilinear;
+            ConfigureMaskImporter(importer, channelCount);
             importer.SaveAndReimport();
+        }
+
+        /// <summary>Linear data texture. One channel imports as single-channel (R8/BC4); alpha only with four.</summary>
+        public static void ConfigureMaskImporter(TextureImporter importer, int channelCount)
+        {
+            var settings = new TextureImporterSettings();
+            importer.ReadTextureSettings(settings);
+            settings.textureType = channelCount == 1 ? TextureImporterType.SingleChannel : TextureImporterType.Default;
+            settings.singleChannelComponent = TextureImporterSingleChannelComponent.Red;
+            settings.sRGBTexture = false;
+            settings.alphaSource = channelCount >= 4 ? TextureImporterAlphaSource.FromInput : TextureImporterAlphaSource.None;
+            settings.alphaIsTransparency = false;
+            settings.mipmapEnabled = true;
+            settings.filterMode = FilterMode.Bilinear;
+            importer.SetTextureSettings(settings);
         }
 
         public static bool IsImportedAsSrgb(string assetPath) =>

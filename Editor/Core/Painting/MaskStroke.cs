@@ -57,7 +57,8 @@ namespace Archura.UVMaskPainter.Editor.Painting
             }
 
             if (anyPainted)
-                edit.Composite(brush.Mode, brush.TargetValue, brush.Strength, brush.Channels, changed);
+                edit.Composite(brush.Mode == BrushMode.Smooth ? CompositeOp.Smooth : CompositeOp.Blend,
+                    brush.TargetValue, brush.Strength, brush.Channels, changed);
         }
 
         // Cursor left the surface; resume without connecting the gap.

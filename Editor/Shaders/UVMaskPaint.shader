@@ -137,6 +137,13 @@ Shader "Hidden/Archura/UVMaskPainter/Paint"
         return lerp(base, _Value, amount);
     }
 
+    float4 FragCompositeInvert(QuadVaryings i) : SV_Target
+    {
+        float4 base = tex2Dlod(_MainTex, float4(i.uv, 0, 0));
+        float amount = saturate(tex2Dlod(_CoverageTex, float4(i.uv, 0, 0)).r) * _Strength;
+        return lerp(base, 1.0 - base, amount);
+    }
+
     float4 FragCompositeSmooth(QuadVaryings i) : SV_Target
     {
         float4 base = tex2Dlod(_MainTex, float4(i.uv, 0, 0));
@@ -216,6 +223,17 @@ Shader "Hidden/Archura/UVMaskPainter/Paint"
             CGPROGRAM
             #pragma vertex VertQuad
             #pragma fragment FragCompositeSmooth
+            ENDCG
+        }
+
+        // 5: Invert (mask operations)
+        Pass
+        {
+            Name "CompositeInvert"
+            ColorMask [_ColorMask]
+            CGPROGRAM
+            #pragma vertex VertQuad
+            #pragma fragment FragCompositeInvert
             ENDCG
         }
     }
