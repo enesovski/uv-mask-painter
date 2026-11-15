@@ -1,0 +1,18 @@
+{
+    "name": "Archura.UVMaskPainter.Editor",
+    "rootNamespace": "Archura.UVMaskPainter.Editor",
+    "references": [
+        "Archura.UVMaskPainter"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,25 @@
+{
+    "name": "Archura.UVMaskPainter.Editor.Tests",
+    "rootNamespace": "Archura.UVMaskPainter.Editor.Tests",
+    "references": [
+        "Archura.UVMaskPainter",
+        "Archura.UVMaskPainter.Editor",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
