@@ -12,7 +12,7 @@ using Object = UnityEngine.Object;
 namespace Archura.UVMaskPainter.Editor.UI
 {
     /// <summary>
-    /// Paint-mode state for one renderer: its masks, the active mask's document and the live preview.
+    /// Paint-mode state for one renderer or terrain: its masks, the active mask's document and the live preview.
     /// The single place that decides defaults so the UI stays dumb.
     /// </summary>
     public sealed class PainterSession : IDisposable
@@ -23,7 +23,7 @@ namespace Archura.UVMaskPainter.Editor.UI
 
         private const string LastMaskKeyPrefix = "Archura.UVMaskPainter.LastMask.";
 
-        public Renderer Renderer { get; }
+        public PaintSubject Subject { get; }
         public MeshSurface Surface { get; private set; }
         public string Error { get; private set; }
         public IReadOnlyList<MaskEntry> Masks => masks;
@@ -48,11 +48,11 @@ namespace Archura.UVMaskPainter.Editor.UI
         // Warn once per editor session, not on every selection.
         private static readonly HashSet<string> warned = new HashSet<string>();
 
-        public static void Begin(Renderer renderer)
+        public static void Begin(PaintSubject subject)
         {
             End();
-            if (renderer == null) return;
-            Active = new PainterSession(renderer);
+            if (subject == null || !subject.IsAlive) return;
+            Active = new PainterSession(subject);
             StateChanged?.Invoke();
         }
 
@@ -64,12 +64,12 @@ namespace Archura.UVMaskPainter.Editor.UI
             StateChanged?.Invoke();
         }
 
-        private PainterSession(Renderer renderer)
+        private PainterSession(PaintSubject subject)
         {
-            Renderer = renderer;
+            Subject = subject;
             PaintHistory.MemoryBudgetBytes = Settings.UndoMemoryMB * 1024L * 1024L;
             MaskLibrary.Changed += OnLibraryChanged;
-            masks = MaskLibrary.FindFor(renderer);
+            masks = MaskLibrary.FindFor(subject);
             SelectMask(PickInitialMask());
             if (Surface == null && Error == null) BuildSurface(0);
             FitBrushToObject();
@@ -98,23 +98,18 @@ namespace Archura.UVMaskPainter.Editor.UI
         }
 
         /// <summary>True if the mesh has this UV set (masks can only be painted in UV sets the mesh has).</summary>
-        public bool HasUV(int uvChannel)
-        {
-            Mesh mesh = Renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh
-                      : Renderer != null && Renderer.TryGetComponent(out MeshFilter filter) ? filter.sharedMesh : null;
-            return mesh != null && mesh.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.TexCoord0 + uvChannel);
-        }
+        public bool HasUV(int uvChannel) => Subject.HasUV(uvChannel);
 
         /// <summary>Creates a mask for this object (or adopts <paramref name="existing"/>) and makes it active.</summary>
         public MaskEntry CreateMask(string name, int channelCount, int resolution = 0, Texture2D existing = null)
         {
             Settings.NewMaskChannels = channelCount;
             Texture2D texture = existing != null
-                ? MaskFactory.Adopt(existing, Renderer, channelCount)
-                : MaskFactory.Create(Renderer, name, channelCount, resolution);
+                ? MaskFactory.Adopt(existing, Subject, channelCount)
+                : MaskFactory.Create(Subject, name, channelCount, resolution);
 
             // Shader authors can reserve a slot for masks; fill it without asking.
-            MaskBinding suggestion = existing == null ? MaskBindings.SuggestFor(Renderer) : null;
+            MaskBinding suggestion = existing == null ? MaskBindings.SuggestFor(Subject) : null;
             if (suggestion != null) MaskBindings.Bind(suggestion, texture);
 
             RefreshMasks();
@@ -125,7 +120,7 @@ namespace Archura.UVMaskPainter.Editor.UI
 
         public string RenameMask(MaskEntry entry, string newName)
         {
-            string error = AssetDatabase.RenameAsset(entry.Path, MaskFactory.SanitizeFileName(newName, Renderer));
+            string error = AssetDatabase.RenameAsset(entry.Path, MaskFactory.SanitizeFileName(newName, Subject));
             RefreshMasks();
             return string.IsNullOrEmpty(error) ? null : error;
         }
@@ -250,7 +245,7 @@ namespace Archura.UVMaskPainter.Editor.UI
 
         // ---------- Internals ----------
 
-        private string LastMaskKey => LastMaskKeyPrefix + MaskLibrary.OwnerKey(Renderer);
+        private string LastMaskKey => LastMaskKeyPrefix + MaskLibrary.OwnerKey(Subject);
 
         // Last mask used on this object, else one its material uses, else the first.
         private MaskEntry PickInitialMask()
@@ -272,14 +267,14 @@ namespace Archura.UVMaskPainter.Editor.UI
 
         private void OnLibraryChanged()
         {
-            if (Active != this || Renderer == null) return;
+            if (Active != this || !Subject.IsAlive) return;
             RefreshMasks();
         }
 
         // Re-reads the list; keeps the active mask (its bindings may have changed) or drops it if deleted.
         private void RefreshMasks()
         {
-            masks = MaskLibrary.FindFor(Renderer);
+            masks = MaskLibrary.FindFor(Subject);
             if (ActiveMask != null)
             {
                 MaskEntry current = Find(ActiveMask.Guid);
@@ -305,19 +300,21 @@ namespace Archura.UVMaskPainter.Editor.UI
             edit(info);
             info.Write(entry.Path);
             RefreshMasks();
+            MaskEntry updated = Find(entry.Guid);
+            if (updated != null) MaskSurfaceSetup.SyncAll(updated);
         }
 
         private void BuildSurface(int uvChannel)
         {
             Surface?.Dispose();
-            Error = MeshSurface.TryCreate(Renderer, uvChannel, out MeshSurface surface, out string error) ? null : error;
+            Error = MeshSurface.TryCreate(Subject, uvChannel, out MeshSurface surface, out string error) ? null : error;
             Surface = surface;
         }
 
         private bool EnsureDocument()
         {
             if (Document != null) return true;
-            CreateMask(MaskFactory.DefaultName(Renderer), Settings.NewMaskChannels);
+            CreateMask(MaskFactory.DefaultName(Subject), Settings.NewMaskChannels);
             return Document != null;
         }
 
@@ -340,18 +337,18 @@ namespace Archura.UVMaskPainter.Editor.UI
         private void Bind()
         {
             MaskBinding binding = PreviewBinding;
-            if (binding == null || Document == null || Renderer == null) return;
+            if (binding == null || Document == null || !Subject.IsAlive) return;
             boundMaterialIndex = binding.MaterialIndex;
-            Renderer.GetPropertyBlock(originalBlock, boundMaterialIndex);
-            Renderer.GetPropertyBlock(previewBlock, boundMaterialIndex);
+            Subject.GetPropertyBlock(originalBlock, boundMaterialIndex);
+            Subject.GetPropertyBlock(previewBlock, boundMaterialIndex);
             previewBlock.SetTexture(binding.PropertyName, Document.Texture);
-            Renderer.SetPropertyBlock(previewBlock, boundMaterialIndex);
+            Subject.SetPropertyBlock(previewBlock, boundMaterialIndex);
         }
 
         private void Unbind()
         {
             if (boundMaterialIndex < 0) return;
-            if (Renderer != null) Renderer.SetPropertyBlock(originalBlock.isEmpty ? null : originalBlock, boundMaterialIndex);
+            if (Subject.IsAlive) Subject.SetPropertyBlock(originalBlock, boundMaterialIndex);
             boundMaterialIndex = -1;
         }
 
@@ -385,7 +382,7 @@ namespace Archura.UVMaskPainter.Editor.UI
         // Default brush is meaningless on very small or very large objects; start at ~5% of the object.
         private void FitBrushToObject()
         {
-            float size = Renderer.bounds.size.magnitude;
+            float size = Subject.Bounds.size.magnitude;
             if (size <= 0f) return;
             BrushSettings brush = Settings.Brush;
             if (brush.Radius > size * 0.5f || brush.Radius < size * 0.005f)

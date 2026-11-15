@@ -77,7 +77,7 @@ namespace Archura.UVMaskPainter.Editor.UI
         {
             PainterSession session = PainterSession.Active;
             if (session == null) return;
-            nameField.value = MaskFactory.DefaultName(session.Renderer);
+            nameField.value = MaskFactory.DefaultName(session.Subject);
             existing.value = null;
             resolution.index = 0;
             resolution.SetEnabled(true);

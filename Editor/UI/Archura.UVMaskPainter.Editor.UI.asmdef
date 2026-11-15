@@ -2,7 +2,8 @@
     "name": "Archura.UVMaskPainter.Editor.UI",
     "rootNamespace": "Archura.UVMaskPainter.Editor.UI",
     "references": [
-        "Archura.UVMaskPainter.Editor"
+        "Archura.UVMaskPainter.Editor",
+        "Archura.UVMaskPainter"
     ],
     "includePlatforms": [
         "Editor"

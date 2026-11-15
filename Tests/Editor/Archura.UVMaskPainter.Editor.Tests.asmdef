@@ -2,6 +2,7 @@
     "name": "Archura.UVMaskPainter.Editor.Tests",
     "rootNamespace": "Archura.UVMaskPainter.Editor.Tests",
     "references": [
+        "Archura.UVMaskPainter",
         "Archura.UVMaskPainter.Editor",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"

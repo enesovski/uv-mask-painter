@@ -16,22 +16,22 @@ namespace Archura.UVMaskPainter.Editor.Targeting
         // Shader usage: [ArchuraMask] _Wear ("Wear", 2D) = "black" {}
         public const string MaskAttribute = "ArchuraMask";
 
-        /// <summary>Every visible 2D texture property of every material on the renderer.</summary>
-        public static List<MaskBinding> GetOptions(Renderer renderer)
+        /// <summary>Every visible 2D texture property of every material on the renderer (or the terrain's material).</summary>
+        public static List<MaskBinding> GetOptions(PaintSubject subject)
         {
             var options = new List<MaskBinding>();
-            if (renderer == null) return options;
-            Material[] materials = renderer.sharedMaterials;
+            if (subject == null || !subject.IsAlive) return options;
+            Material[] materials = subject.SharedMaterials;
             for (int i = 0; i < materials.Length; i++)
                 foreach (string property in GetTextureProperties(materials[i]))
-                    options.Add(new MaskBinding(renderer, i, property));
+                    options.Add(new MaskBinding(subject, i, property));
             return options;
         }
 
         /// <summary>First empty [ArchuraMask] property on an editable material, or null.</summary>
-        public static MaskBinding SuggestFor(Renderer renderer)
+        public static MaskBinding SuggestFor(PaintSubject subject)
         {
-            foreach (MaskBinding option in GetOptions(renderer))
+            foreach (MaskBinding option in GetOptions(subject))
                 if (option.Texture == null && HasMaskAttribute(option.Material.shader, option.PropertyName) && CanBind(option, out _))
                     return option;
             return null;

@@ -1,7 +1,8 @@
 # UV Mask Painter (Archura)
 
-Unity Editor tool for painting R/G/B/A data masks directly on meshes in the Scene view.
+Unity Editor tool for painting R/G/B/A data masks directly on meshes, skinned meshes and terrains in the Scene view.
 Asset Store product of Archura. Git root is this folder (inside `Assets/Archura/UVMaskPainter`).
+This file lives in `.claude/` so Unity never imports it and it never ships; `Publishing~/` is dev-only for the same reason.
 
 ## Principles
 - **UX first, fewest steps.** Target flow: select renderer → press P → paint. No dialogs, no required components or colliders. Defaults are decided automatically; informational messages go to the Console, never into the panel.
@@ -12,9 +13,10 @@ Asset Store product of Archura. Git root is this folder (inside `Assets/Archura/
 
 ## Layout
 ```
+Runtime/                 Archura.UVMaskPainter          (ships in builds) MaskSampler, MaskSurface
 Editor/Core/             Archura.UVMaskPainter.Editor   (engine, no UI)
-  Geometry/   MeshSurface (render-mesh picking, BVH), UVIslands
-  Targeting/  MaskBinding (renderer+slot+property), MaskBindings (options, [ArchuraMask] suggestion, bind), drawer
+  Geometry/   MeshSurface (render-mesh picking, BVH), TerrainMesh (terrain stand-in mesh), UVIslands
+  Targeting/  PaintSubject (Renderer or Terrain), MaskBinding (subject+slot+property), MaskBindings, drawer
   Document/   MaskInfo (.meta metadata), MaskLibrary (find masks for a renderer), MaskDocument (GPU working copy),
               TextureIO, MaskFactory, ChannelPacker, MaskChannels
   Painting/   BrushSettings, StrokeSampler, MaskStroke, MaskFill, MaskEdit, PaintResources
@@ -24,10 +26,15 @@ Editor/UI/               Archura.UVMaskPainter.Editor.UI (depends on Core, never
   SceneView/  MaskPainterTool (+ Mesh/Skinned variants), shortcuts, BrushAdjust (hold-key adjust), overlay, drawing
   Controls/   PainterPanel (overlay content: mask list, tools, brush), NewMaskForm, InlinePrompt
   Window/     ChannelPackWindow (Assets ▸ Archura ▸ Pack Channels)
+  Inspectors/ MaskSurfaceEditor + MaskSurfaceSetup (add/sync runtime samplers)
   Settings/   Preferences provider
 Editor/Shaders/          Hidden/Archura/UVMaskPainter/Paint, /Preview
 Tests/Editor/            Archura.UVMaskPainter.Editor.Tests (EditMode)
+Samples/                 Planned demos (RainyPuddles, MossWalls, TerrainBiomes, CharacterGrime) + Shared/; see Samples/README.md
+Documentation/Manual.md  User manual (ships)
+Publishing~/             Release checklist and store listing draft (ignored by Unity)
 ```
+UI references Core and Runtime; Core never references UI; Runtime references nothing.
 Core namespaces follow folders (`Archura.UVMaskPainter.Editor.<Folder>`). The UI assembly uses a single `Archura.UVMaskPainter.Editor.UI` namespace, because a `SceneView` namespace would shadow `UnityEditor.SceneView`.
 
 ## How the engine works
@@ -45,7 +52,9 @@ Core namespaces follow folders (`Archura.UVMaskPainter.Editor.<Folder>`). The UI
 
 ## Mask model
 - **A mask is a texture with metadata** in its importer `userData` (`MaskInfo`: channel count 1–4, channel names, owner, UV set) plus the asset label `ArchuraMask`. Ordinary material textures are never listed.
-- **Owner** (`MaskLibrary.OwnerKey`): the mesh asset (so instances sharing a mesh share masks), or the scene object for built-in/procedural meshes.
+- **Owner** (`MaskLibrary.OwnerKey`): the mesh asset (so instances sharing a mesh share masks), the TerrainData for terrains, or the scene object for built-in/procedural meshes.
+- **Terrains** paint through `TerrainMesh`, a hidden stand-in mesh (≤513² vertices) whose UV0 is the normalized terrain position. Only UV0 exists; live preview uses `Terrain.SetSplatMaterialPropertyBlock`.
+- **Runtime:** `MaskSampler` copies a mask to the CPU (GPU blit + ReadPixels when not readable). `MaskSurface` holds mask, UV set and channel names; the painter keeps it in sync (`MaskSurfaceSetup.SyncAll` after metadata edits).
 - **A renderer's masks** = masks used by its materials + masks owned by its mesh.
 - **Material use is explicit** ("Use in Material"). Exception: a new mask fills an empty `[ArchuraMask]` property.
 - **Channel count drives import:** 1 → SingleChannel R8, 2–3 → no alpha, 4 → RGBA. Files are always RGBA PNGs, so changing the count never loses data.
@@ -81,5 +90,6 @@ Run the EditMode tests in Test Runner (`Archura.UVMaskPainter.Editor.Tests`). Th
 - [x] Phase 2: Scene tool (P to paint, overlay, shortcuts, cursor, auto target, first stroke creates the mask, autosave, live preview)
 - [x] Phase 3: fill/clear/invert/resize, channel-packed export, preferences
 - [x] Redesign: explicit masks (name, channel count, channel names), mask list with switch/rename/ping/delete, hold-key brush adjust, window and v1 removed
-- [ ] Next: value-under-cursor readout, Make Unique material, UV/2D view, pen-pressure options, PainterSession tests
-- [ ] Phase 4: samples per render pipeline, docs, Asset Store polish
+- [x] Terrain support and runtime sampling API (MaskSampler, MaskSurface), manual, publishing docs
+- [ ] Phase 4: build the four demos (Samples/), Built-in/URP/HDRP demo shaders, store media, compatibility testing (see Publishing~/Checklist.md)
+- [ ] Later: procedural fills (slope/height/curvature/AO), Shader Graph subgraph, multi-object painting, stencil brushes, UV/2D view, value-under-cursor readout

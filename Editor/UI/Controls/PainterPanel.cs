@@ -132,7 +132,7 @@ namespace Archura.UVMaskPainter.Editor.UI
             maskList.Clear();
             if (session == null) return;
 
-            title.text = $"Masks · {session.Renderer.name}";
+            title.text = $"Masks · {session.Subject.Name}";
             title.tooltip = "Masks of the selected object: masks its materials use, plus masks made for its mesh.";
 
             foreach (MaskEntry entry in session.Masks)
@@ -346,6 +346,7 @@ namespace Archura.UVMaskPainter.Editor.UI
                 }
                 menu.AddSeparator(string.Empty);
             }
+            menu.AddItem(new GUIContent("Add Runtime Sampler (Mask Surface)"), false, () => MaskSurfaceSetup.Add(session.Subject.GameObject, entry));
             menu.AddItem(new GUIContent("Duplicate"), false, () => session.DuplicateMask(entry));
             menu.AddItem(new GUIContent("Show in Project"), false, () => EditorGUIUtility.PingObject(entry.Texture));
             menu.AddItem(new GUIContent("Delete…"), false, () => ConfirmDelete(session, entry));
@@ -355,7 +356,7 @@ namespace Archura.UVMaskPainter.Editor.UI
         private static void AddUseInMaterialItems(GenericMenu menu, PainterSession session, MaskEntry entry)
         {
             const string prefix = "Use in Material/";
-            List<MaskBinding> options = MaskBindings.GetOptions(session.Renderer);
+            List<MaskBinding> options = MaskBindings.GetOptions(session.Subject);
             if (options.Count == 0) menu.AddDisabledItem(new GUIContent(prefix + "No texture properties"));
             foreach (MaskBinding option in options)
             {

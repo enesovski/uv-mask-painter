@@ -7,7 +7,7 @@ using UnityEngine;
 
 namespace Archura.UVMaskPainter.Editor.Document
 {
-    /// <summary>A mask texture as seen from one renderer: its metadata and where that renderer's materials use it.</summary>
+    /// <summary>A mask texture as seen from one renderer or terrain: its metadata and where its materials use it.</summary>
     public sealed class MaskEntry
     {
         public Texture2D Texture { get; }
@@ -40,34 +40,42 @@ namespace Archura.UVMaskPainter.Editor.Document
         public static void Invalidate() => cache = null;
 
         /// <summary>
-        /// Identifies what a mask was painted for. Mesh assets share masks (same UVs); built-in and
-        /// procedural meshes fall back to the scene object.
+        /// Identifies what a mask was painted for. Mesh assets share masks (same UVs), terrains are keyed by
+        /// their TerrainData, and built-in or procedural meshes fall back to the scene object.
         /// </summary>
-        public static string OwnerKey(Renderer renderer)
+        public static string OwnerKey(PaintSubject subject)
         {
-            if (renderer == null) return string.Empty;
-            Mesh mesh = renderer is SkinnedMeshRenderer skinned ? skinned.sharedMesh
-                      : renderer.TryGetComponent(out MeshFilter filter) ? filter.sharedMesh : null;
+            if (subject == null || !subject.IsAlive) return string.Empty;
 
-            string meshPath = mesh != null ? AssetDatabase.GetAssetPath(mesh) : null;
-            if (!string.IsNullOrEmpty(meshPath) && (meshPath.StartsWith("Assets/") || meshPath.StartsWith("Packages/")) &&
-                AssetDatabase.TryGetGUIDAndLocalFileIdentifier(mesh, out string guid, out long localId))
-                return $"mesh:{guid}:{localId}";
+            if (subject.Terrain != null && TryGetAssetKey(subject.Terrain.terrainData, out string terrainKey))
+                return "terrain:" + terrainKey;
+            if (TryGetAssetKey(subject.SourceMesh, out string meshKey))
+                return "mesh:" + meshKey;
 
             // Objects in a never-saved scene have no file id yet; the instance id lasts for this session.
-            GlobalObjectId id = GlobalObjectId.GetGlobalObjectIdSlow(renderer);
-            return id.targetObjectId != 0 ? "object:" + id : "instance:" + renderer.GetInstanceID();
+            GlobalObjectId id = GlobalObjectId.GetGlobalObjectIdSlow(subject.Component);
+            return id.targetObjectId != 0 ? "object:" + id : "instance:" + subject.Component.GetInstanceID();
         }
 
-        /// <summary>Masks used by the renderer's materials, then masks made for its mesh. Sorted by name.</summary>
-        public static List<MaskEntry> FindFor(Renderer renderer)
+        private static bool TryGetAssetKey(UnityEngine.Object asset, out string key)
+        {
+            key = null;
+            string path = asset != null ? AssetDatabase.GetAssetPath(asset) : null;
+            if (string.IsNullOrEmpty(path) || !(path.StartsWith("Assets/") || path.StartsWith("Packages/"))) return false;
+            if (!AssetDatabase.TryGetGUIDAndLocalFileIdentifier(asset, out string guid, out long localId)) return false;
+            key = $"{guid}:{localId}";
+            return true;
+        }
+
+        /// <summary>Masks used by the subject's materials, then masks made for its mesh or terrain. Sorted by name.</summary>
+        public static List<MaskEntry> FindFor(PaintSubject subject)
         {
             var entries = new List<MaskEntry>();
-            if (renderer == null) return entries;
+            if (subject == null || !subject.IsAlive) return entries;
             var byPath = new Dictionary<string, MaskEntry>();
             Dictionary<string, MaskInfo> all = All();
 
-            Material[] materials = renderer.sharedMaterials;
+            Material[] materials = subject.SharedMaterials;
             for (int i = 0; i < materials.Length; i++)
             {
                 if (materials[i] == null) continue;
@@ -79,11 +87,11 @@ namespace Archura.UVMaskPainter.Editor.Document
                     if (!all.TryGetValue(path, out MaskInfo info)) continue;
                     if (!byPath.TryGetValue(path, out MaskEntry entry))
                         byPath[path] = entry = new MaskEntry(texture, info);
-                    entry.Bindings.Add(new MaskBinding(renderer, i, property));
+                    entry.Bindings.Add(new MaskBinding(subject, i, property));
                 }
             }
 
-            string owner = OwnerKey(renderer);
+            string owner = OwnerKey(subject);
             foreach (KeyValuePair<string, MaskInfo> pair in all)
             {
                 if (pair.Value.Owner != owner || byPath.ContainsKey(pair.Key)) continue;

@@ -28,7 +28,7 @@ namespace Archura.UVMaskPainter.Editor.UI
                 return;
             }
             if (!MaskPainterTool.Activate() && SceneView.lastActiveSceneView != null)
-                SceneView.lastActiveSceneView.ShowNotification(new GUIContent("Select a mesh to paint"), 1.5f);
+                SceneView.lastActiveSceneView.ShowNotification(new GUIContent("Select a mesh or terrain to paint"), 1.5f);
         }
 
         // Hold and move the mouse sideways, like Terrain Tools (S size, A opacity).

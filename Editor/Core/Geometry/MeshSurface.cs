@@ -1,20 +1,27 @@
 using System;
 using System.Collections.Generic;
+using Archura.UVMaskPainter.Editor.Targeting;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
 namespace Archura.UVMaskPainter.Editor.Geometry
 {
-    /// <summary>Paintable geometry of a renderer (the drawn mesh, no colliders/physics, works in Prefab Mode).</summary>
+    /// <summary>
+    /// Paintable geometry of a renderer or terrain (the drawn mesh, no colliders/physics, works in Prefab Mode).
+    /// Skinned meshes are baked; terrains get a stand-in mesh from their heightmap.
+    /// </summary>
     public sealed class MeshSurface : IDisposable
     {
-        public Renderer Renderer { get; }
-        // Baked snapshot for skinned meshes.
+        public PaintSubject Subject { get; }
         public Mesh Mesh { get; }
         public int UVChannel { get; }
         public int SubmeshCount => Mesh.subMeshCount;
-        public Matrix4x4 LocalToWorld => Renderer.transform.localToWorldMatrix;
+
+        // Terrains ignore rotation and scale.
+        public Matrix4x4 LocalToWorld => Subject.Terrain != null
+            ? Matrix4x4.Translate(Subject.Terrain.transform.position)
+            : Subject.Component.transform.localToWorldMatrix;
 
         private readonly bool ownsMesh;
         private readonly Vector3[] vertices;
@@ -25,9 +32,9 @@ namespace Archura.UVMaskPainter.Editor.Geometry
         private readonly TriangleBvh bvh;
         private int[] islandOfTriangle;            // computed on first use
 
-        private MeshSurface(Renderer renderer, Mesh mesh, bool ownsMesh, int uvChannel, Vector2[] uvs)
+        private MeshSurface(PaintSubject subject, Mesh mesh, bool ownsMesh, int uvChannel, Vector2[] uvs)
         {
-            Renderer = renderer;
+            Subject = subject;
             Mesh = mesh;
             this.ownsMesh = ownsMesh;
             UVChannel = uvChannel;
@@ -51,14 +58,14 @@ namespace Archura.UVMaskPainter.Editor.Geometry
             bvh = new TriangleBvh(vertices, triangles);
         }
 
-        public static bool TryCreate(Renderer renderer, int uvChannel, out MeshSurface surface, out string error)
+        public static bool TryCreate(PaintSubject subject, int uvChannel, out MeshSurface surface, out string error)
         {
             surface = null;
             error = null;
 
-            if (renderer == null)
+            if (subject == null || !subject.IsAlive)
             {
-                error = "No renderer selected.";
+                error = "Select a mesh or terrain to paint.";
                 return false;
             }
             if (uvChannel < 0 || uvChannel > 3)
@@ -69,10 +76,15 @@ namespace Archura.UVMaskPainter.Editor.Geometry
 
             Mesh mesh;
             bool ownsMesh = false;
-            switch (renderer)
+            switch (subject.Component)
             {
+                case Terrain terrain:
+                    mesh = TerrainMesh.Build(terrain);
+                    ownsMesh = mesh != null;
+                    break;
+
                 case MeshRenderer _:
-                    var filter = renderer.GetComponent<MeshFilter>();
+                    var filter = subject.Component.GetComponent<MeshFilter>();
                     mesh = filter != null ? filter.sharedMesh : null;
                     break;
 
@@ -87,13 +99,13 @@ namespace Archura.UVMaskPainter.Editor.Geometry
                     break;
 
                 default:
-                    error = $"{renderer.GetType().Name} can't be painted. Use a MeshRenderer or SkinnedMeshRenderer.";
+                    error = $"{subject.Component.GetType().Name} can't be painted. Use a MeshRenderer, SkinnedMeshRenderer or Terrain.";
                     return false;
             }
 
             if (mesh == null)
             {
-                error = $"'{renderer.name}' has no mesh.";
+                error = $"'{subject.Name}' has no mesh or terrain data.";
                 return false;
             }
 
@@ -101,12 +113,12 @@ namespace Archura.UVMaskPainter.Editor.Geometry
             mesh.GetUVs(uvChannel, uvList);
             if (uvList.Count == 0)
             {
-                error = $"'{mesh.name}' has no UV{uvChannel} coordinates.";
+                error = $"'{subject.Name}' has no UV{uvChannel} coordinates.";
                 if (ownsMesh) Object.DestroyImmediate(mesh);
                 return false;
             }
 
-            surface = new MeshSurface(renderer, mesh, ownsMesh, uvChannel, uvList.ToArray());
+            surface = new MeshSurface(subject, mesh, ownsMesh, uvChannel, uvList.ToArray());
             return true;
         }
 

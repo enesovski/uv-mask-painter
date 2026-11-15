@@ -1,5 +1,6 @@
 using Archura.UVMaskPainter.Editor.Geometry;
 using Archura.UVMaskPainter.Editor.Painting;
+using Archura.UVMaskPainter.Editor.Targeting;
 using UnityEditor;
 using UnityEditor.EditorTools;
 using UnityEditor.ShortcutManagement;
@@ -8,7 +9,7 @@ using UnityEngine;
 namespace Archura.UVMaskPainter.Editor.UI
 {
     /// <summary>
-    /// Scene view paint mode. Appears in the Tools overlay for any selected renderer (or press P).
+    /// Scene view paint mode. Appears in the Tools overlay for a selected mesh or terrain (or press P).
     /// LMB paints · Ctrl erases · Shift smooths · hold S/A/D and move to adjust · double-click another mesh to switch.
     /// </summary>
     // Unity matches component tools by exact type, so each supported renderer gets its own entry.
@@ -18,18 +19,23 @@ namespace Archura.UVMaskPainter.Editor.UI
     [EditorTool("UV Mask Painter", typeof(SkinnedMeshRenderer))]
     internal sealed class SkinnedMaskPainterTool : MaskPainterTool { }
 
+    [EditorTool("UV Mask Painter", typeof(Terrain))]
+    internal sealed class TerrainMaskPainterTool : MaskPainterTool { }
+
     internal abstract class MaskPainterTool : EditorTool
     {
         public static bool IsActive => ToolManager.activeToolType != null && typeof(MaskPainterTool).IsAssignableFrom(ToolManager.activeToolType);
 
-        /// <summary>Enters paint mode for the selected renderer. Returns false if nothing paintable is selected.</summary>
+        /// <summary>Enters paint mode for the selected mesh or terrain. Returns false if nothing paintable is selected.</summary>
         public static bool Activate()
         {
             GameObject selected = Selection.activeGameObject;
             if (selected == null) return false;
-            if (selected.GetComponent<MeshRenderer>() != null) ToolManager.SetActiveTool<MeshMaskPainterTool>();
-            else if (selected.GetComponent<SkinnedMeshRenderer>() != null) ToolManager.SetActiveTool<SkinnedMaskPainterTool>();
-            else return false;
+            PaintSubject subject = PaintSubject.From(selected);
+            if (subject == null) return false;
+            if (subject.Terrain != null) ToolManager.SetActiveTool<TerrainMaskPainterTool>();
+            else if (subject.Renderer is SkinnedMeshRenderer) ToolManager.SetActiveTool<SkinnedMaskPainterTool>();
+            else ToolManager.SetActiveTool<MeshMaskPainterTool>();
             return true;
         }
 
@@ -50,7 +56,7 @@ namespace Archura.UVMaskPainter.Editor.UI
         {
             ShortcutManager.RegisterContext(shortcutContext);
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
-            PainterSession.Begin(target as Renderer);
+            PainterSession.Begin(PaintSubject.From(target as Component));
             SceneView.RepaintAll();
         }
 
@@ -68,11 +74,11 @@ namespace Archura.UVMaskPainter.Editor.UI
             if (!(window is SceneView view)) return;
 
             // Selection changed to another renderer while the tool stays active.
-            var renderer = target as Renderer;
-            if (PainterSession.Active == null || PainterSession.Active.Renderer != renderer)
+            PaintSubject subject = PaintSubject.From(target as Component);
+            if (PainterSession.Active == null || PainterSession.Active.Subject != subject)
             {
                 EndStroke();
-                PainterSession.Begin(renderer);
+                PainterSession.Begin(subject);
             }
 
             PainterSession session = PainterSession.Active;
@@ -122,7 +128,7 @@ namespace Archura.UVMaskPainter.Editor.UI
                         e.Use();
                         break;
                     }
-                    if (!UpdateHover(e, session) || IsOccluded(e.mousePosition, session.Renderer)) break;
+                    if (!UpdateHover(e, session) || IsOccluded(e.mousePosition, session.Subject)) break;
 
                     GUIUtility.hotControl = controlId;
                     BrushSettings brush = Settings.Brush;
@@ -187,16 +193,16 @@ namespace Archura.UVMaskPainter.Editor.UI
         }
 
         // Something else in front of the target: don't paint through it.
-        private static bool IsOccluded(Vector2 mousePosition, Renderer renderer)
+        private static bool IsOccluded(Vector2 mousePosition, PaintSubject subject)
         {
             GameObject picked = HandleUtility.PickGameObject(mousePosition, false);
-            return picked != null && picked != renderer.gameObject;
+            return picked != null && picked != subject.GameObject;
         }
 
         private static bool TrySwitchTarget(Vector2 mousePosition, PainterSession session)
         {
             GameObject picked = HandleUtility.PickGameObject(mousePosition, false);
-            if (picked == null || picked == session.Renderer.gameObject || picked.GetComponent<Renderer>() == null) return false;
+            if (picked == null || picked == session.Subject.GameObject || PaintSubject.From(picked) == null) return false;
             Selection.activeGameObject = picked;
             return true;
         }

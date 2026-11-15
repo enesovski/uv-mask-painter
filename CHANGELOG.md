@@ -1,8 +1,11 @@
 # Changelog
 
-## [2.0.0-preview] - Unreleased
+## [2.0.0] - Unreleased
 ### Added
-- Scene view paint mode. Press P or use the Tools overlay. Supports MeshRenderer and SkinnedMeshRenderer.
+- Scene view paint mode. Press P or use the Tools overlay. Supports MeshRenderer, SkinnedMeshRenderer and Terrain.
+- Terrain painting: the brush follows the terrain's heights, and masks cover the terrain (UV = normalized position) and are saved next to the TerrainData.
+- Runtime sampling: `MaskSampler` (CPU copy of any mask, readable or not; allocation-free bilinear and point sampling) and the optional `MaskSurface` component (look up channels by name, `MaskSurface.TrySampleAt(hit, "Wet", out value)`, terrain lookups by world position). Add it from ⋯ ▸ Add Runtime Sampler; it stays in sync with the painter.
+- User manual (Documentation/Manual.md) and sample folder structure for four planned demos.
 - Masks are created explicitly with a name and 1–4 channels (R, RG, RGB, RGBA). Each channel can be named, and channel buttons and shortcuts only show the channels a mask has.
 - Scene overlay with a mask list: switch, rename, ping, duplicate and delete masks, change channels or UV set, and choose which material property uses a mask.
 - Hold S / A / D and move the mouse to adjust brush size, opacity and value (like Terrain Tools). `-` / `=` step the value.
@@ -26,7 +29,7 @@
 - EditMode test suite.
 
 ### Changed
-- Namespace changed to `Archura.UVMaskPainter`. Code is now split into Editor and Tests assemblies.
+- Namespace changed to `Archura.UVMaskPainter`. Code is split into Runtime (`Archura.UVMaskPainter`), Editor and Tests assemblies.
 
 ### Removed
 - The v1 editor windows, inspectors, Mask Painter tool and manager.
